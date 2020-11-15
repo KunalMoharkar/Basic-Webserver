@@ -3,10 +3,76 @@
 
 #define MAXBUF (8192)
 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t c = PTHREAD_COND_INITIALIZER;
+pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
+
 
 //
 //	TODO: add code to create and manage the buffer
 //
+
+//struct to hold the request object
+//int fd and string query that is passed along with request and int reqsize that holds size of requested file
+typedef struct http_request
+{
+  int fd;
+  char *query;
+  int reqsize;
+
+} httpreq;
+
+//create a buffer of httprequest to hold incoming requests
+httpreq req_buf[100000];
+int front=0;
+int rear=0;
+int size = 0;
+httpreq req;
+
+void push(httpreq *req_buf,httpreq req)
+{
+  //queue is not full
+  if(rear-front<buffer_max_size)
+  {
+  //fifo
+  if(scheduling_algo==0)
+  {
+    req_buf[rear] = req;
+  }
+  //sff
+  else
+  { 
+    int i=rear;
+    int size = req.reqsize;
+
+    while(i>=0&&req_buf[i].reqsize > size)
+    {  
+       req_buf[i+1] = req_buf[i];
+       i--;
+    }
+
+    req_buf[i+1] = req;
+  } 
+
+  rear++;
+  size++;
+  }
+}
+
+httpreq pop(httpreq *req_buf)
+{ 
+  //if queue is not empty
+  if(rear-front!=-1)
+  {
+    httpreq req = req_buf[front];
+    front++;
+    size--;
+    return req;
+  }
+
+}
+
+
 
 //
 // Sends out HTTP response in case of errors
@@ -135,6 +201,18 @@ void request_serve_static(int fd, char *filename, int filesize) {
 void* thread_request_serve_static(void* arg)
 {
 	// TODO: write code to actualy respond to HTTP requests
+  
+  pthread_mutex_lock(&lock);
+
+  while(size==0)
+  {
+    pthread_cond_wait(&c,&lock);
+  }
+  req = pop(req_buf);
+  printf("%d",rear);
+  request_serve_static(req.fd,req.query,req.reqsize);
+  pthread_cond_signal(&c);
+  pthread_mutex_unlock(&lock);
 }
 
 //
@@ -149,25 +227,28 @@ void request_handle(int fd) {
 	// get the request type, file path and HTTP version
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
+    printf("here");
     printf("method:%s uri:%s version:%s\n", method, uri, version);
-
-	// verify if the request type is GET is not
+    printf("%s","alpha");
+	  // verify if the request type is GET is not
     if (strcasecmp(method, "GET")) {
 		request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
 		return;
     }
     request_read_headers(fd);
     
-	// check requested content type (static/dynamic)
+	  // check requested content type (static/dynamic)
+    printf("here");
     is_static = request_parse_uri(uri, filename, cgiargs);
     
-	// get some data regarding the requested file, also check if requested file is present on server
+	  // get some data regarding the requested file, also check if requested file is present on server
+    printf("here");
     if (stat(filename, &sbuf) < 0) {
 		request_error(fd, filename, "404", "Not found", "server could not find this file");
 		return;
     }
     
-	// verify if requested content is static
+	  // verify if requested content is static
     if (is_static) {
 		if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
 			request_error(fd, filename, "403", "Forbidden", "server could not read this file");
@@ -175,6 +256,18 @@ void request_handle(int fd) {
 		}
 		
 		// TODO: write code to add HTTP requests in the buffer based on the scheduling policy
+
+    pthread_mutex_lock(&lock); 
+    req.fd = fd;
+    req.query = strdup(filename);
+    req.reqsize = sbuf.st_size;
+    while(size == buffer_max_size)
+    {
+        pthread_cond_wait(&c,&lock);
+    }
+    push(req_buf,req);
+    pthread_cond_signal(&c);
+    pthread_mutex_unlock(&lock);
 
     } else {
 		request_error(fd, filename, "501", "Not Implemented", "server does not serve dynamic content request");
