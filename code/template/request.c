@@ -7,7 +7,6 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t c = PTHREAD_COND_INITIALIZER;
 pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
 
-
 //
 //	TODO: add code to create and manage the buffer
 //
@@ -29,40 +28,58 @@ int rear=0;
 int size = 0;
 httpreq req;
 
+void show(httpreq *req_buf)
+{
+  int i;
+  for(i=front;i<rear;i++)
+  { 
+    printf("\n\n");
+    printf("fd - %d\nquery - %s\nreqsize - %d\n",req_buf[i].fd,req_buf[i].query,req_buf[i].reqsize);
+    printf("\n\n");
+  }
+}
+
 void push(httpreq *req_buf,httpreq req)
 {
   //queue is not full
-  if(rear-front<buffer_max_size)
+  if(size<buffer_max_size)
   {
-  //fifo
-  if(scheduling_algo==0)
-  {
-    req_buf[rear] = req;
-  }
-  //sff
-  else
-  { 
-    int i=rear;
-    int size = req.reqsize;
-
-    while(i>=0&&req_buf[i].reqsize > size)
-    {  
-       req_buf[i+1] = req_buf[i];
-       i--;
+    //fifo
+    if(scheduling_algo==0)
+    {
+      req_buf[rear] = req;
     }
+    //sff
+    else
+    { 
+      int i=rear;
+      int reqsize = req.reqsize;
 
-    req_buf[i+1] = req;
-  } 
-
-  rear++;
-  size++;
+      if(i == 0)
+      {
+        req_buf[i] = req;
+      }
+      else
+      {    
+        while(i>=0&&req_buf[i-1].reqsize > reqsize)
+        {  
+          req_buf[i] = req_buf[i-1];
+          i--;
+        }
+  
+        req_buf[i] = req;
+      }
+    } 
+    rear++;
+    size++;
   }
+  show(req_buf);
 }
 
 httpreq pop(httpreq *req_buf)
 { 
   //if queue is not empty
-  if(rear-front!=-1)
+  if(size!=0)
   {
     httpreq req = req_buf[front];
     front++;
@@ -208,9 +225,9 @@ void* thread_request_serve_static(void* arg)
   {
     pthread_cond_wait(&c,&lock);
   }
-  req = pop(req_buf);
-  printf("%d",rear);
-  request_serve_static(req.fd,req.query,req.reqsize);
+  //req = pop(req_buf);
+  //printf("%d",rear);
+  //request_serve_static(req.fd,req.query,req.reqsize);
   pthread_cond_signal(&c);
   pthread_mutex_unlock(&lock);
 }
