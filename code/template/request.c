@@ -4,7 +4,7 @@
 #define MAXBUF (8192)
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t c = PTHREAD_COND_INITIALIZER;
+pthread_cond_t full = PTHREAD_COND_INITIALIZER;
 pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
 
 //
@@ -61,9 +61,9 @@ void push(httpreq *req_buf,httpreq req)
       }
       else
       {    
-        while(i>=0&&req_buf[i-1].reqsize > reqsize)
+        while(i>=front&&req_buf[i-1].reqsize > reqsize)
         {  
-          req_buf[i] = req_buf[i-1];
+          req_buf[i+front] = req_buf[i-1+front];
           i--;
         }
   
@@ -73,7 +73,7 @@ void push(httpreq *req_buf,httpreq req)
     rear++;
     size++;
   }
-  show(req_buf);
+  //show(req_buf);
 }
 
 httpreq pop(httpreq *req_buf)
@@ -87,9 +87,8 @@ httpreq pop(httpreq *req_buf)
     return req;
   }
 
+  return;
 }
-
-
 
 //
 // Sends out HTTP response in case of errors
@@ -218,18 +217,22 @@ void request_serve_static(int fd, char *filename, int filesize) {
 void* thread_request_serve_static(void* arg)
 {
 	// TODO: write code to actualy respond to HTTP requests
-  
+  while (1)
+  {
+    /* code */
   pthread_mutex_lock(&lock);
 
   while(size==0)
   {
-    pthread_cond_wait(&c,&lock);
+    pthread_cond_wait(&full,&lock);
   }
-  //req = pop(req_buf);
-  //printf("%d",rear);
-  //request_serve_static(req.fd,req.query,req.reqsize);
-  pthread_cond_signal(&c);
+  req = pop(req_buf);
+  pthread_cond_signal(&empty);
+  printf("consume");
+  printf("\n%d---%s----%d\n",req.fd,req.query,req.reqsize);
+  request_serve_static(req.fd,req.query,req.reqsize);
   pthread_mutex_unlock(&lock);
+  }
 }
 
 //
@@ -244,9 +247,7 @@ void request_handle(int fd) {
 	// get the request type, file path and HTTP version
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
-    printf("here");
     printf("method:%s uri:%s version:%s\n", method, uri, version);
-    printf("%s","alpha");
 	  // verify if the request type is GET is not
     if (strcasecmp(method, "GET")) {
 		request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
@@ -255,11 +256,11 @@ void request_handle(int fd) {
     request_read_headers(fd);
     
 	  // check requested content type (static/dynamic)
-    printf("here");
+
     is_static = request_parse_uri(uri, filename, cgiargs);
     
 	  // get some data regarding the requested file, also check if requested file is present on server
-    printf("here");
+  
     if (stat(filename, &sbuf) < 0) {
 		request_error(fd, filename, "404", "Not found", "server could not find this file");
 		return;
@@ -280,10 +281,11 @@ void request_handle(int fd) {
     req.reqsize = sbuf.st_size;
     while(size == buffer_max_size)
     {
-        pthread_cond_wait(&c,&lock);
+        pthread_cond_wait(&empty,&lock);
     }
     push(req_buf,req);
-    pthread_cond_signal(&c);
+    printf("produce");
+    pthread_cond_signal(&full);
     pthread_mutex_unlock(&lock);
 
     } else {
