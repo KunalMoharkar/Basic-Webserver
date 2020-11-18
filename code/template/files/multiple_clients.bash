@@ -2,7 +2,7 @@
 
 echo Starting requests
 
-for j in $(seq 1 1)
+for j in $(seq 1 6)
 do
 	for ((i=15;i>0;i-=1)) ;
 	do

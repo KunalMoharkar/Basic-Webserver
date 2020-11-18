@@ -23,12 +23,31 @@ typedef struct http_request
 
 //create a buffer of httprequest to hold incoming requests
 httpreq req_buf[100000];
-int front=0;
+int front=-1;
 int rear=0;
 int size = 0;
-httpreq req;
 
-void show(httpreq *req_buf)
+int isempty()
+{
+  if(size==0)
+  {
+    return 1;
+  }
+
+  return 0;
+}
+
+int isfull()
+{
+  if(size==buffer_max_size)
+  {
+    return 1;
+  }
+
+  return 0;
+} 
+
+void show()
 {
   int i;
   for(i=front;i<rear;i++)
@@ -39,55 +58,82 @@ void show(httpreq *req_buf)
   }
 }
 
-void push(httpreq *req_buf,httpreq req)
+void push(httpreq req)
 {
   //queue is not full
-  if(size<buffer_max_size)
+  if(!isfull())
   {
     //fifo
     if(scheduling_algo==0)
     {
-      req_buf[rear] = req;
+        if(isempty())
+        {  
+          req_buf[rear] = req;
+          front =0;
+        }
+        else
+        {
+          rear++;
+          req_buf[rear] = req;
+        } 
     }
     //sff
     else
     { 
-      int i=rear;
-      int reqsize = req.reqsize;
 
-      if(i == 0)
+
+      if(isempty())
       {
-        req_buf[i] = req;
+        req_buf[rear] = req;
+        front =0;
       }
       else
-      {    
-        while(i>=front&&req_buf[i-1].reqsize > reqsize)
-        {  
-          req_buf[i+front] = req_buf[i-1+front];
+      {
+        int new_req_size = req.reqsize;
+        int i = rear;
+        
+        while(i>=front&&req_buf[i].reqsize > new_req_size)
+        {
+          req_buf[i+1] = req_buf[i];
           i--;
         }
-  
-        req_buf[i] = req;
+
+        req_buf[i+1] = req;
+        rear++;
+        
       }
+      
+      
     } 
-    rear++;
+    
     size++;
   }
   //show(req_buf);
 }
 
-httpreq pop(httpreq *req_buf)
+httpreq pop()
 { 
   //if queue is not empty
-  if(size!=0)
+  if(!isempty())
   {
     httpreq req = req_buf[front];
     front++;
     size--;
+
+    if(isempty())
+    {
+      rear = 0;
+      front = -1;
+    }
+    
+    if(size==1)
+    {
+      rear = 0;
+      front = 0; 
+    }
+
     return req;
   }
-
-  return;
 }
 
 //
@@ -219,14 +265,14 @@ void* thread_request_serve_static(void* arg)
 	// TODO: write code to actualy respond to HTTP requests
   while (1)
   {
-    /* code */
+
   pthread_mutex_lock(&lock);
 
   while(size==0)
   {
     pthread_cond_wait(&full,&lock);
   }
-  req = pop(req_buf);
+  httpreq req = pop();
   pthread_cond_signal(&empty);
   printf("consume");
   printf("\n%d---%s----%d\n",req.fd,req.query,req.reqsize);
@@ -276,6 +322,7 @@ void request_handle(int fd) {
 		// TODO: write code to add HTTP requests in the buffer based on the scheduling policy
 
     pthread_mutex_lock(&lock); 
+    httpreq req;
     req.fd = fd;
     req.query = strdup(filename);
     req.reqsize = sbuf.st_size;
@@ -283,7 +330,7 @@ void request_handle(int fd) {
     {
         pthread_cond_wait(&empty,&lock);
     }
-    push(req_buf,req);
+    push(req);
     printf("produce");
     pthread_cond_signal(&full);
     pthread_mutex_unlock(&lock);
