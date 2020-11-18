@@ -136,6 +136,33 @@ httpreq pop()
   }
 }
 
+
+int validate_request(char *path)
+{    
+    int count = 0;
+    char *string,*found;
+    string = strdup(path);
+    while( (found = strsep(&string,"/")) != NULL )
+    {
+      if(strcmp(found,"..")==0)
+      {
+        count--;
+      }
+      else
+      {
+        count++;
+      }
+      
+    }
+    printf("%d",count);
+    if(count > 1)
+    {
+      return 1;
+    }
+        
+    return 0;
+}
+
 //
 // Sends out HTTP response in case of errors
 //
@@ -294,6 +321,11 @@ void request_handle(int fd) {
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
     printf("method:%s uri:%s version:%s\n", method, uri, version);
+
+    int is_valid_path = validate_request(uri);
+    //abort if path not valid
+    assert(is_valid_path==1);
+
 	  // verify if the request type is GET is not
     if (strcasecmp(method, "GET")) {
 		request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
