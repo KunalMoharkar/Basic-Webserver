@@ -50,23 +50,32 @@ int isfull()
 void show()
 {
   int i;
-  for(i=front;i<rear;i++)
-  { 
-    printf("\n\n");
-    printf("fd - %d\nquery - %s\nreqsize - %d\n",req_buf[i].fd,req_buf[i].query,req_buf[i].reqsize);
-    printf("\n\n");
+  
+  printf("\n");
+  printf("request_queue: ");
+  if(size!=0)
+  {
+    for(i=front;i<=rear;i++)
+    { 
+      if(i!=-1)
+      {
+        printf("fd--%d--",req_buf[i].fd);  
+      }
+    }
+
   }
+  printf("\n");
 }
 
 void push(httpreq req)
 {
   //queue is not full
-  if(!isfull())
+  if(size!=buffer_max_size)
   {
     //fifo
     if(scheduling_algo==0)
     {
-        if(isempty())
+        if(size==0)
         {  
           req_buf[rear] = req;
           front =0;
@@ -82,7 +91,7 @@ void push(httpreq req)
     { 
 
 
-      if(isempty())
+      if(size==0)
       {
         req_buf[rear] = req;
         front =0;
@@ -114,13 +123,13 @@ void push(httpreq req)
 httpreq pop()
 { 
   //if queue is not empty
-  if(!isempty())
+  if(size!=0)
   {
     httpreq req = req_buf[front];
     front++;
     size--;
 
-    if(isempty())
+    if(size==0)
     {
       rear = 0;
       front = -1;
@@ -128,8 +137,8 @@ httpreq pop()
     
     if(size==1)
     {
-      rear = 0;
-      front = 0; 
+      //rear = 0;
+      //front = 0; 
     }
 
     return req;
@@ -154,7 +163,6 @@ int validate_request(char *path)
       }
       
     }
-    printf("%d",count);
     if(count > 1)
     {
       return 1;
@@ -301,10 +309,11 @@ void* thread_request_serve_static(void* arg)
   }
   httpreq req = pop();
   pthread_cond_signal(&empty);
-  printf("consume");
-  printf("\n%d---%s----%d\n",req.fd,req.query,req.reqsize);
-  request_serve_static(req.fd,req.query,req.reqsize);
+  printf("\n\nconsume----");
+  printf("%d\n\n",req.fd);
+  show();
   pthread_mutex_unlock(&lock);
+  request_serve_static(req.fd,req.query,req.reqsize);
   }
 }
 
@@ -363,7 +372,8 @@ void request_handle(int fd) {
         pthread_cond_wait(&empty,&lock);
     }
     push(req);
-    printf("produce");
+    printf("\n\nproduce---%d\n\n",fd);
+    show();
     pthread_cond_signal(&full);
     pthread_mutex_unlock(&lock);
 
