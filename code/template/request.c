@@ -51,7 +51,7 @@ void show()
     { 
       if(i!=-1)
       {
-        printf("fd--%d--",req_buf[i].fd);   //print the descripter of requested file
+        printf("fd--%d(%d)--",req_buf[i].fd,req_buf[i].reqsize);   //print the descripter of requested file
       }
     }
 
@@ -84,7 +84,7 @@ void push(httpreq req)
           req_buf[rear] = req;
         } 
     }
-    //sff
+    //sff  
     else
     { 
 
