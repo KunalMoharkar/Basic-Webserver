@@ -1,9 +1,11 @@
 #include "io_helper.h"
 #include "request.h"
-
 #define MAXBUF (8192)
+#define MAX_REQUEST_BUFFER_SIZE (10000)
 
+//pthread mutex lock
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+//2 condition variables for producer consumer problem
 pthread_cond_t full = PTHREAD_COND_INITIALIZER;
 pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
 
@@ -12,7 +14,9 @@ pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
 //
 
 //struct to hold the request object
-//int fd and string query that is passed along with request and int reqsize that holds size of requested file
+//int fd - file descripter  
+//string query is reuqested uri (filename) 
+//int reqsize holds size of requested file (for sff)
 typedef struct http_request
 {
   int fd;
@@ -21,52 +25,46 @@ typedef struct http_request
 
 } httpreq;
 
-//create a buffer of httprequest to hold incoming requests
-httpreq req_buf[100000];
-int front=-1;
-int rear=0;
-int size = 0;
+//create a global buffer queue of httprequest to hold incoming requests
+httpreq req_buf[MAX_REQUEST_BUFFER_SIZE];
 
-int isempty()
-{
-  if(size==0)
-  {
-    return 1;
-  }
+int front=-1; //points to front of queue
+int rear=0;   //points to rear of queue
+int size = 0; //number of requests in the buffer
 
-  return 0;
-}
+/*
+SUPPORTS INSERTION AND DELETION IN CONSTANT TIME IN FIFO
+SUPPORTS INSERTION IN O(N) AND DELETION IN CONSTANT TIME IN SFF
+*/
 
-int isfull()
-{
-  if(size==buffer_max_size)
-  {
-    return 1;
-  }
-
-  return 0;
-} 
-
+//outputs the contents of the queue
 void show()
 {
   int i;
   
   printf("\n");
   printf("request_queue: ");
-  if(size!=0)
+  //if queue not empty show its contents
+  if(size!=0)                   
   {
     for(i=front;i<=rear;i++)
     { 
       if(i!=-1)
       {
-        printf("fd--%d--",req_buf[i].fd);  
+        printf("fd--%d--",req_buf[i].fd);   //print the descripter of requested file
       }
     }
 
   }
-  printf("\n");
+  else   //if queue is empty
+  {
+    printf(" empty");
+  }
+  
+  printf("\n\n");
 }
 
+//inserts a request into buffer queue (put routine)
 void push(httpreq req)
 {
   //queue is not full
@@ -74,8 +72,8 @@ void push(httpreq req)
   {
     //fifo
     if(scheduling_algo==0)
-    {
-        if(size==0)
+    { 
+        if(size==0)               //insert at the last
         {  
           req_buf[rear] = req;
           front =0;
@@ -90,7 +88,6 @@ void push(httpreq req)
     else
     { 
 
-
       if(size==0)
       {
         req_buf[rear] = req;
@@ -101,57 +98,53 @@ void push(httpreq req)
         int new_req_size = req.reqsize;
         int i = rear;
         
-        while(i>=front&&req_buf[i].reqsize > new_req_size)
+        while(i>=front&&req_buf[i].reqsize > new_req_size) //while new request size                                               
         {
-          req_buf[i+1] = req_buf[i];
+          req_buf[i+1] = req_buf[i];    //shift the elements one position
           i--;
         }
 
-        req_buf[i+1] = req;
+        req_buf[i+1] = req;             //insert at its appropriate position
         rear++;
         
       }
       
       
     } 
-    
+    //increment the current size by 1 
     size++;
   }
-  //show(req_buf);
 }
 
+//removes the request from the front of the queue
 httpreq pop()
 { 
   //if queue is not empty
   if(size!=0)
   {
-    httpreq req = req_buf[front];
-    front++;
-    size--;
+    httpreq req = req_buf[front]; //get the first request 
+    front++;                      //move to front by 1 pos
+    size--;                       //decrement current size od buffer
 
     if(size==0)
     {
       rear = 0;
       front = -1;
     }
-    
-    if(size==1)
-    {
-      //rear = 0;
-      //front = 0; 
-    }
-
-    return req;
+    return req;                  //return the removed request
   }
 }
 
-
+//check if request is valid i.e int the server root dir subtree 
 int validate_request(char *path)
 {    
+    /*if in the requested path number of '..' 
+      exceed number of directory names reject request*/ 
+    
     int count = 0;
     char *string,*found;
     string = strdup(path);
-    while( (found = strsep(&string,"/")) != NULL )
+    while( (found = strsep(&string,"/")) != NULL ) //seperate on '/'
     {
       if(strcmp(found,"..")==0)
       {
@@ -163,7 +156,7 @@ int validate_request(char *path)
       }
       
     }
-    if(count > 1)
+    if(count > 1)  //valid return 1
     {
       return 1;
     }
@@ -298,22 +291,20 @@ void request_serve_static(int fd, char *filename, int filesize) {
 void* thread_request_serve_static(void* arg)
 {
 	// TODO: write code to actualy respond to HTTP requests
-  while (1)
-  {
 
-  pthread_mutex_lock(&lock);
-
-  while(size==0)
+  while (1) //keep consuming the requests
   {
-    pthread_cond_wait(&full,&lock);
-  }
-  httpreq req = pop();
-  pthread_cond_signal(&empty);
-  printf("\n\nconsume----");
-  printf("%d\n\n",req.fd);
-  show();
-  pthread_mutex_unlock(&lock);
-  request_serve_static(req.fd,req.query,req.reqsize);
+    pthread_mutex_lock(&lock); //hold lock for critical operation
+    while(size==0)              //wait if the buffer is empty releasing the lock
+    {
+      pthread_cond_wait(&full,&lock);
+    }
+    httpreq req = pop();     //remove request for the queue
+    printf("\nRequest for %s with fd %d is removed from the buffer.", req.query, req.fd);
+    show();                       //show buffer contents
+    pthread_cond_signal(&empty); //signal the producer to wake up 
+    pthread_mutex_unlock(&lock);  //release the lock
+    request_serve_static(req.fd,req.query,req.reqsize); //serve the request
   }
 }
 
@@ -331,16 +322,23 @@ void request_handle(int fd) {
     sscanf(buf, "%s %s %s", method, uri, version);
     printf("method:%s uri:%s version:%s\n", method, uri, version);
 
-    int is_valid_path = validate_request(uri);
-    //abort if path not valid
-    assert(is_valid_path==1);
-
 	  // verify if the request type is GET is not
     if (strcasecmp(method, "GET")) {
 		request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
 		return;
     }
     request_read_headers(fd);
+
+
+    //verify if request in valid
+    int is_valid_path = validate_request(uri);
+
+    //if request is not secure
+    if(is_valid_path==0)
+    {
+      request_error(fd, method, "403", "Forbidden", "Traversing up in filesystem is not allowed");
+	  	return;
+    }
     
 	  // check requested content type (static/dynamic)
 
@@ -359,23 +357,30 @@ void request_handle(int fd) {
 			request_error(fd, filename, "403", "Forbidden", "server could not read this file");
 			return;
 		}
+
+   
+
 		
 		// TODO: write code to add HTTP requests in the buffer based on the scheduling policy
-
-    pthread_mutex_lock(&lock); 
+    
+    //create a new request object
     httpreq req;
-    req.fd = fd;
-    req.query = strdup(filename);
-    req.reqsize = sbuf.st_size;
-    while(size == buffer_max_size)
+    req.fd = fd;                  //descriptor
+    req.query = strdup(filename); //filename
+    req.reqsize = sbuf.st_size;   //filesize
+
+
+    //hold the lock as critical operation on buffer
+    pthread_mutex_lock(&lock); 
+    while(size == buffer_max_size) //wait if buffer already full and release the lock
     {
         pthread_cond_wait(&empty,&lock);
     }
-    push(req);
-    printf("\n\nproduce---%d\n\n",fd);
-    show();
-    pthread_cond_signal(&full);
-    pthread_mutex_unlock(&lock);
+    push(req);   //insert new request in buffer
+    printf("\nRequest for %s with fd %d is added to the buffer", req.query, req.fd);
+    show();      //show buffer content
+    pthread_cond_signal(&full);   //signal to sleeping consumer threads
+    pthread_mutex_unlock(&lock); //release the lock
 
     } else {
 		request_error(fd, filename, "501", "Not Implemented", "server does not serve dynamic content request");
